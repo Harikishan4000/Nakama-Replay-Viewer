@@ -1130,6 +1130,10 @@
 
       <div class="panel hidden" id="heatmap-panel">
         <div class="panel-title">Heatmap Layers</div>
+        <label class="toggle-row" style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <input type="checkbox" id="tog-daily-heatmap">
+          <span style="color:var(--accent);font-size:11px">📊 Daily aggregate</span>
+        </label>
         <label class="toggle-row">
           <input type="checkbox" id="tog-heat-traffic" checked>
           <span class="swatch" style="background:linear-gradient(90deg,#0040ff,#00ffff,#ffff00,#ff0000)"></span>
@@ -1467,6 +1471,7 @@
       traffic: document.getElementById('tog-heat-traffic'),
       kills: document.getElementById('tog-heat-kills'),
       deaths: document.getElementById('tog-heat-deaths'),
+      daily: document.getElementById('tog-daily-heatmap'),
     };
 
     // Toast container
@@ -2293,13 +2298,53 @@
       ctx.textBaseline = 'alphabetic';
     }
 
+    // Compute daily aggregated heatmap data (all matches on selected date/map)
+    function getDailyHeatmapData(mapId, date) {
+      const positions = [];
+      const markers = [];
+      if (!eventData) return { positions, markers };
+      const matchIds = matchIndex
+        .filter(m => m.map_id === mapId && m.date === date)
+        .map(m => m.match_id);
+      for (const matchId of matchIds) {
+        const events = eventData[mapId]?.[matchId] ?? [];
+        for (const ev of events) {
+          if (ev.event === 'Position' || ev.event === 'BotPosition') {
+            positions.push(ev);
+          } else {
+            markers.push(ev);
+          }
+        }
+      }
+      return { positions, markers };
+    }
+
     // ── HEATMAP VIEW ──────────────────────────────────────────────
     function drawHeatmapView(mapId, { allPositions, allMarkers }, W, H) {
       const cutTs = timeline.currentTs || timeline.maxTs;
 
-      // Filter by time using binary search
-      const positions = allPositions.slice(0, cutoffIndex(allPositions, cutTs));
-      const markers = allMarkers.slice(0, cutoffIndex(allMarkers, cutTs));
+      // Use daily aggregated data if toggle is on, otherwise use match data
+      let positions, markers;
+      if (HEAT.daily.checked) {
+        const date = matchIndex.find(m => m.match_id === currentMatchId)?.date;
+        if (date) {
+          const dailyData = getDailyHeatmapData(mapId, date);
+          positions = dailyData.positions;
+          markers = dailyData.markers;
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'right';
+          ctx.fillText('Showing: all matches this day', W - 12, 18);
+          ctx.textAlign = 'left';
+        } else {
+          positions = allPositions.slice(0, cutoffIndex(allPositions, cutTs));
+          markers = allMarkers.slice(0, cutoffIndex(allMarkers, cutTs));
+        }
+      } else {
+        // Filter by time using binary search
+        positions = allPositions.slice(0, cutoffIndex(allPositions, cutTs));
+        markers = allMarkers.slice(0, cutoffIndex(allMarkers, cutTs));
+      }
 
       const killPts = markers.filter(e => e.event === 'Kill' || e.event === 'BotKill');
       const deathPts = markers.filter(e => e.event === 'Killed' || e.event === 'BotKilled' || e.event === 'KilledByStorm');
