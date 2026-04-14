@@ -1,0 +1,2826 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nakama Replay Viewer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-dim: #7d8590;
+      --accent: #58a6ff;
+      --human: #58a6ff;
+      --bot: #ff7b72;
+      --kill: #f85149;
+      --loot: #3fb950;
+      --storm: #d2a8ff;
+      --radius: 8px;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    header .pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    #server-warning {
+      margin-left: auto;
+      background: #3d2b00;
+      border: 1px solid #7d4e00;
+      border-radius: var(--radius);
+      padding: 4px 10px;
+      font-size: 11px;
+      color: #e3b341;
+      display: none;
+    }
+
+    /* ── Main layout ─────────────────────────────────────── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────── */
+    aside {
+      width: 260px;
+      min-width: 260px;
+      background: var(--surface);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      flex-shrink: 0;
+    }
+
+    aside.left {
+      border-right: 1px solid var(--border);
+    }
+
+    aside.right {
+      border-left: 1px solid var(--border);
+    }
+
+    .panel {
+      border-bottom: 1px solid var(--border);
+      padding: 14px 16px;
+    }
+
+    .panel-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    /* Dropdowns */
+    select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+      margin-bottom: 8px;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%237d8590'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      padding-right: 24px;
+    }
+
+    select:last-child {
+      margin-bottom: 0;
+    }
+
+    select:focus {
+      border-color: var(--accent);
+    }
+
+    select:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .stat-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+
+    .stat-box .val {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .stat-box .lbl {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .stat-box.wide {
+      grid-column: 1 / -1;
+    }
+
+    .stat-box .val.human {
+      color: var(--human);
+    }
+
+    .stat-box .val.bot {
+      color: var(--bot);
+    }
+
+    /* Toggles */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .toggle-row input[type=checkbox] {
+      accent-color: var(--accent);
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+    }
+
+    .toggle-row .swatch {
+      width: 20px;
+      height: 3px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .toggle-row .icon {
+      font-size: 13px;
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .toggle-row span {
+      color: var(--text);
+    }
+
+    /* ── Canvas area ─────────────────────────────────────── */
+    .canvas-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #080b10;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .canvas-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      border-radius: 4px;
+      box-shadow: 0 0 0 1px var(--border);
+    }
+
+    /* ── Segmented view-mode toggle ────────────────────── */
+    .seg {
+      display: flex;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .seg button {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background .12s, color .12s;
+    }
+
+    .seg button:hover {
+      color: var(--text);
+    }
+
+    .seg button.active {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .panel.hidden {
+      display: none;
+    }
+
+    /* ── Timeline bar ──────────────────────────────────── */
+    #timeline-bar {
+      background: linear-gradient(180deg, #161b22 0%, #1a2030 100%);
+      border-top: 2px solid var(--accent);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    .timeline-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      flex-shrink: 0;
+      padding-right: 12px;
+      border-right: 1px solid var(--border);
+      margin-right: 4px;
+    }
+
+    .timeline-label svg {
+      display: block;
+    }
+
+    #play-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      border: none;
+      font-size: 16px;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform .12s, background .15s, box-shadow .15s;
+      box-shadow: 0 2px 12px rgba(88, 166, 255, 0.45);
+    }
+
+    #play-btn:hover:not(:disabled) {
+      background: #4493e6;
+      transform: scale(1.06);
+    }
+
+    #play-btn:active:not(:disabled) {
+      transform: scale(0.96);
+    }
+
+    #play-btn:disabled {
+      background: var(--surface2);
+      color: var(--text-dim);
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    #play-btn.playing {
+      background: #f85149;
+      box-shadow: 0 2px 12px rgba(248, 81, 73, 0.45);
+    }
+
+    #play-btn.playing:hover {
+      background: #d83a32;
+    }
+
+    /* Pulsing hint when a fresh match is loaded */
+    @keyframes pulse-ring {
+      0% {
+        box-shadow: 0 2px 12px rgba(88, 166, 255, 0.45), 0 0 0 0 rgba(88, 166, 255, 0.55);
+      }
+
+      70% {
+        box-shadow: 0 2px 12px rgba(88, 166, 255, 0.45), 0 0 0 14px rgba(88, 166, 255, 0);
+      }
+
+      100% {
+        box-shadow: 0 2px 12px rgba(88, 166, 255, 0.45), 0 0 0 0 rgba(88, 166, 255, 0);
+      }
+    }
+
+    #play-btn.hint {
+      animation: pulse-ring 1.6s ease-out infinite;
+    }
+
+    /* Slider with custom progress fill */
+    .slider-wrap {
+      flex: 1;
+      position: relative;
+      height: 24px;
+      display: flex;
+      align-items: center;
+    }
+
+    #time-slider {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 8px;
+      background: transparent;
+      border-radius: 4px;
+      outline: none;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+
+    #slider-track {
+      position: absolute;
+      inset: 8px 0;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    #slider-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--accent) 0%, #79c0ff 100%);
+      border-radius: 4px;
+      transition: width .03s linear;
+      box-shadow: 0 0 8px rgba(88, 166, 255, 0.4);
+    }
+
+    #time-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: grab;
+      border: 3px solid var(--accent);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      transition: transform .1s;
+    }
+
+    #time-slider:not(:disabled)::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+    }
+
+    #time-slider::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: grab;
+      border: 3px solid var(--accent);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+
+    #time-slider:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #time-display {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      min-width: 130px;
+      text-align: center;
+      flex-shrink: 0;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      letter-spacing: 0.5px;
+    }
+
+    #time-display .sep {
+      color: var(--text-dim);
+      margin: 0 4px;
+    }
+
+    #time-display .total {
+      color: var(--text-dim);
+    }
+
+    .speed-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .speed-wrap label {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    #speed-select {
+      width: auto;
+      margin: 0;
+      padding: 6px 24px 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    /* Status overlay on canvas */
+    #canvas-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    #canvas-overlay.hidden {
+      display: none;
+    }
+
+    .overlay-msg {
+      background: rgba(13, 17, 23, .85);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 22px;
+      text-align: center;
+      backdrop-filter: blur(4px);
+    }
+
+    .overlay-msg .icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+
+    .overlay-msg p {
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .overlay-msg code {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      color: var(--text);
+      display: inline-block;
+      margin-top: 4px;
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* ── Share button ───────────────────────────────────── */
+    #share-btn {
+      margin-left: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-dim);
+      font-size: 11px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background .12s, color .12s, border-color .12s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    #share-btn:hover {
+      background: var(--border);
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    #share-btn.copied {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    /* ── Hot zones ──────────────────────────────────────── */
+    .hotzone-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hotzone-item:last-child {
+      border-bottom: none;
+    }
+
+    .hotzone-badge {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 11px;
+      flex-shrink: 0;
+      color: #fff;
+    }
+
+    .hotzone-badge.rank-1 {
+      background: #f85149;
+    }
+
+    .hotzone-badge.rank-2 {
+      background: #fd7e14;
+    }
+
+    .hotzone-badge.rank-3 {
+      background: #e3b341;
+      color: #000;
+    }
+
+    .hotzone-grid {
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .hotzone-count {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* ── Activity Timeline (Gantt) ──────────────────────── */
+    .at-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 5px;
+      font-size: 10px;
+    }
+
+    .at-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .at-label {
+      width: 78px;
+      flex-shrink: 0;
+      font-family: monospace;
+      color: var(--text-dim);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: right;
+      font-size: 10px;
+    }
+
+    .at-track {
+      flex: 1;
+      height: 9px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 3px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .at-bar {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-radius: 3px;
+      opacity: 0.82;
+      transition: opacity .15s;
+    }
+
+    .at-bar:hover {
+      opacity: 1;
+    }
+
+    .at-fate {
+      width: 13px;
+      flex-shrink: 0;
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .at-dur {
+      width: 36px;
+      flex-shrink: 0;
+      font-family: monospace;
+      color: var(--text-dim);
+      text-align: right;
+      font-size: 10px;
+    }
+
+    /* axis ticks at 0%, 25%, 50%, 75%, 100% */
+    .at-axis {
+      display: flex;
+      justify-content: space-between;
+      padding-left: 83px;
+      padding-right: 56px;
+      margin-bottom: 4px;
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+
+    /* Event toast notifications (shown during playback) */
+    #event-toasts {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: none;
+      z-index: 15;
+      max-width: 280px;
+      align-items: flex-end;
+    }
+
+    .event-toast {
+      background: rgba(13, 17, 23, 0.94);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      animation: toast-in 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+        toast-out 0.45s ease-in 2.8s forwards;
+      white-space: nowrap;
+    }
+
+    .event-toast .icon {
+      font-size: 15px;
+      line-height: 1;
+    }
+
+    .event-toast .who {
+      font-family: 'SF Mono', Menlo, monospace;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .event-toast.kill {
+      border-left-color: #f85149;
+    }
+
+    .event-toast.death {
+      border-left-color: #ff7b72;
+    }
+
+    .event-toast.storm {
+      border-left-color: var(--storm);
+    }
+
+    .event-toast.loot {
+      border-left-color: var(--loot);
+    }
+
+    @keyframes toast-in {
+      from {
+        transform: translateX(60px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    @keyframes toast-out {
+      to {
+        opacity: 0;
+        transform: translateX(40px);
+      }
+    }
+
+    /* ── Zoom controls ─────────────────────────────────── */
+    .zoom-controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 9;
+    }
+
+    .zoom-btn {
+      width: 32px;
+      height: 32px;
+      background: rgba(13, 17, 23, .88);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+      transition: background .12s;
+    }
+
+    .zoom-btn:hover {
+      background: rgba(30, 40, 55, .95);
+      border-color: var(--accent);
+    }
+
+    .zoom-btn:active {
+      transform: scale(0.94);
+    }
+
+    .zoom-btn:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .zoom-level {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      background: rgba(13, 17, 23, .88);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 6px;
+      text-align: center;
+      margin-top: 2px;
+    }
+
+    /* ── Event details modal (centered) ──────────────────── */
+    .details-modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 420px;
+      max-height: 70vh;
+      background: rgba(13, 17, 23, .97);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      display: none;
+      flex-direction: column;
+      z-index: 50;
+      box-shadow: 0 12px 48px rgba(0, 0, 0, .6);
+      backdrop-filter: blur(8px);
+    }
+
+    .details-modal.open {
+      display: flex;
+    }
+
+    .details-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 49;
+      display: none;
+    }
+
+    .details-backdrop.open {
+      display: block;
+    }
+
+    .details-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .details-title {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .details-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+    }
+
+    .details-close:hover {
+      color: var(--text);
+    }
+
+    .details-body {
+      flex: 1;
+      overflow-y: auto;
+      font-size: 11px;
+    }
+
+    .details-row {
+      display: grid;
+      grid-template-columns: 38px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 5px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background .1s;
+    }
+
+    .details-row:hover {
+      background: rgba(88, 166, 255, .08);
+    }
+
+    .details-row .d-time {
+      font-family: monospace;
+      color: var(--text-dim);
+      font-size: 10px;
+    }
+
+    .details-row .d-who {
+      font-family: monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .details-row .d-icon {
+      font-size: 13px;
+    }
+
+    .details-row .d-coord {
+      font-family: monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+
+    .stat-box {
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+    }
+
+    .stat-box:hover {
+      background: rgba(88, 166, 255, 0.08);
+      border-color: var(--accent);
+    }
+
+    /* ── Lonely zones controls ─────────────────────────── */
+    .lonely-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+      padding-left: 20px;
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .lonely-controls input[type=range] {
+      flex: 1;
+      height: 4px;
+    }
+
+    .lonely-summary {
+      font-size: 10px;
+      color: var(--text-dim);
+      padding-left: 20px;
+      margin-top: 3px;
+    }
+
+    .layer-count {
+      margin-left: auto;
+      font-family: monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      padding: 1px 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 3px;
+    }
+
+    /* Tooltip */
+    #tooltip {
+      position: absolute;
+      background: rgba(13, 17, 23, .92);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      pointer-events: none;
+      display: none;
+      z-index: 10;
+      max-width: 200px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v4l3 3" />
+    </svg>
+    <h1>Nakama Replay Viewer</h1>
+    <span class="pill" id="index-pill">loading…</span>
+    <div id="server-warning">⚠ Open via a local HTTP server — <code>python3 -m http.server</code></div>
+    <button id="share-btn" title="Copy a link to the current map, match and timeline position">🔗 Copy Link</button>
+  </header>
+
+  <div class="main">
+
+    <!-- ── Left sidebar: Filter + Stats ─────────────────────────── -->
+    <aside class="left">
+
+      <div class="panel">
+        <div class="panel-title">Filter</div>
+        <select id="sel-map" disabled>
+          <option value="">Loading…</option>
+        </select>
+        <select id="sel-date" disabled>
+          <option value="">— Select date —</option>
+        </select>
+        <select id="sel-match" disabled>
+          <option value="">— Select match —</option>
+        </select>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Match Stats</div>
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-box wide">
+            <div class="val" id="stat-events">—</div>
+            <div class="lbl">Total Events</div>
+          </div>
+          <div class="stat-box">
+            <div class="val human" id="stat-players">—</div>
+            <div class="lbl">Players</div>
+          </div>
+          <div class="stat-box">
+            <div class="val bot" id="stat-bots">—</div>
+            <div class="lbl">Bots</div>
+          </div>
+          <div class="stat-box">
+            <div class="val" id="stat-kills" style="color:#f85149">—</div>
+            <div class="lbl">Kills</div>
+          </div>
+          <div class="stat-box">
+            <div class="val" id="stat-loot" style="color:#3fb950">—</div>
+            <div class="lbl">Loot</div>
+          </div>
+        </div>
+        <label class="toggle-row" style="margin-top:10px">
+          <input type="checkbox" id="tog-include-positions">
+          <span style="color:var(--text-dim);font-size:11px">Include position samples</span>
+        </label>
+      </div>
+
+    </aside>
+
+    <!-- ── Right sidebar: Controls + Insights ────────────────────── -->
+    <aside class="right" style="order:3">
+
+      <div class="panel">
+        <div class="panel-title">View Mode</div>
+        <div class="seg" id="view-seg">
+          <button data-mode="paths" class="active">Paths</button>
+          <button data-mode="heatmap">Heatmap</button>
+        </div>
+      </div>
+
+      <div class="panel" id="paths-panel">
+        <div class="panel-title">Path Layers</div>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-human-path" checked>
+          <span class="swatch" style="background:var(--human)"></span>
+          <span>Human paths</span>
+          <span class="layer-count" id="cnt-human-path">—</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-bot-path" checked>
+          <span class="swatch" style="background:var(--bot)"></span>
+          <span>Bot paths</span>
+          <span class="layer-count" id="cnt-bot-path">—</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-loot" checked>
+          <span class="icon">📦</span>
+          <span>Loot pickups</span>
+          <span class="layer-count" id="cnt-loot">—</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-kills" checked>
+          <span class="icon">💀</span>
+          <span>Kills</span>
+          <span class="layer-count" id="cnt-kills">—</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-deaths" checked>
+          <span class="icon">✕</span>
+          <span>Deaths</span>
+          <span class="layer-count" id="cnt-deaths">—</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-storm" checked>
+          <span class="icon">⚡</span>
+          <span>Storm deaths</span>
+          <span class="layer-count" id="cnt-storm">—</span>
+        </label>
+      </div>
+
+      <div class="panel hidden" id="heatmap-panel">
+        <div class="panel-title">Heatmap Layers</div>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-heat-traffic" checked>
+          <span class="swatch" style="background:linear-gradient(90deg,#0040ff,#00ffff,#ffff00,#ff0000)"></span>
+          <span>High-traffic areas</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-heat-kills">
+          <span class="swatch" style="background:linear-gradient(90deg,rgba(255,140,0,0),#ffa940)"></span>
+          <span>Kill zones</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-heat-deaths">
+          <span class="swatch" style="background:linear-gradient(90deg,rgba(210,168,255,0),#d2a8ff)"></span>
+          <span>Death zones</span>
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">🏚 Lonely Zones</div>
+        <label class="toggle-row">
+          <input type="checkbox" id="tog-lonely">
+          <span class="swatch"
+            style="background:repeating-linear-gradient(45deg,#334,#334 3px,transparent 3px,transparent 8px)"></span>
+          <span>Show lonely zones</span>
+        </label>
+        <div class="lonely-controls">
+          <span>≤</span>
+          <input type="range" id="lonely-threshold" min="0" max="20" step="1" value="0">
+          <span id="lonely-threshold-val">0</span>
+          <span>evts</span>
+        </div>
+        <div class="lonely-summary" id="lonely-summary">Cells with low activity across all matches that day.</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">🔥 Hot Zones</div>
+        <div id="hotzone-list">
+          <div id="hotzone-empty" style="color:var(--text-dim);font-size:12px">No match selected</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📊 Activity Timeline</div>
+        <label class="toggle-row" style="margin-bottom:8px">
+          <input type="checkbox" id="tog-timeline-bots" checked>
+          <span style="color:var(--text-dim);font-size:11px">Include bots</span>
+        </label>
+        <div id="activity-timeline">
+          <div style="color:var(--text-dim);font-size:12px">No match selected</div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ── Canvas ───────────────────────────────────────────────── -->
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas-area" id="canvas-area">
+        <canvas id="canvas"></canvas>
+
+        <div id="canvas-overlay">
+          <div class="overlay-msg">
+            <div class="icon">🗺</div>
+            <p>Select a map, date, and match<br>to view the replay.</p>
+          </div>
+        </div>
+
+        <div id="tooltip"></div>
+        <div id="event-toasts"></div>
+
+        <div class="zoom-controls">
+          <button class="zoom-btn" id="zoom-in" title="Zoom in  (or scroll)">+</button>
+          <button class="zoom-btn" id="zoom-out" title="Zoom out">−</button>
+          <button class="zoom-btn" id="zoom-reset" title="Reset zoom">⊙</button>
+          <div class="zoom-level" id="zoom-level">1.0×</div>
+        </div>
+      </div>
+
+      <div class="details-backdrop" id="details-backdrop"></div>
+      <div class="details-modal" id="details-modal">
+        <div class="details-header">
+          <span class="details-title" id="details-title">Details</span>
+          <button class="details-close" id="details-close">✕</button>
+        </div>
+        <div class="details-body" id="details-body"></div>
+      </div>
+
+      <div id="timeline-bar">
+        <div class="timeline-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 3" />
+          </svg>
+          Timeline
+        </div>
+        <button id="play-btn" disabled title="Play / Pause">▶</button>
+        <div class="slider-wrap">
+          <div id="slider-track">
+            <div id="slider-fill" style="width:0%"></div>
+          </div>
+          <input type="range" id="time-slider" min="0" max="1000" value="0" disabled>
+        </div>
+        <span id="time-display">
+          <span class="current">--:--</span><span class="sep">/</span><span class="total">--:--</span>
+        </span>
+        <div class="speed-wrap">
+          <label for="speed-select">SPEED</label>
+          <select id="speed-select" disabled>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="8">8×</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .main -->
+
+  <script>
+    'use strict';
+
+    // ═══════════════════════════════════════════════════════════════
+    //  MAP CONFIGURATION  (coordinates provided verbatim)
+    // ═══════════════════════════════════════════════════════════════
+    const MAP_CONFIG = {
+      AmbroseValley: { scale: 900, origin_x: -370, origin_z: -473 },
+      GrandRift: { scale: 581, origin_x: -290, origin_z: -290 },
+      Lockdown: { scale: 1000, origin_x: -500, origin_z: -500 },
+    };
+
+    const MAP_MINIMAP = {
+      AmbroseValley: 'minimaps/AmbroseValley_Minimap.png',
+      GrandRift: 'minimaps/GrandRift_Minimap.png',
+      Lockdown: 'minimaps/Lockdown_Minimap.jpg',
+    };
+
+    /**
+     * Convert world coords (x, z) to canvas pixel coords.
+     * Formula supplied verbatim — do not modify.
+     *
+     * u = (x - origin_x) / scale
+     * v = (z - origin_z) / scale
+     * pixel_x = u * 1024
+     * pixel_y = (1 - v) * 1024   ← Y flipped, image origin top-left
+     */
+    function worldToCanvas(x, z, mapId, W, H) {
+      const { scale, origin_x, origin_z } = MAP_CONFIG[mapId];
+      const u = (x - origin_x) / scale;
+      const v = (z - origin_z) / scale;
+      const pixel_x = u * 1024;
+      const pixel_y = (1 - v) * 1024;
+      return {
+        x: (pixel_x / 1024) * W,
+        y: (pixel_y / 1024) * H,
+      };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  COLOR PALETTES
+    // ═══════════════════════════════════════════════════════════════
+    const HUMAN_COLORS = [
+      '#58a6ff', '#79c0ff', '#1f6feb', '#388bfd', '#a5d6ff',
+      '#cae8ff', '#0d62d6', '#004bb5',
+    ];
+    const BOT_COLORS = [
+      '#ff7b72', '#ffa198', '#f85149', '#da3633', '#ff9500',
+      '#e88c1d', '#fc6423', '#d9460f',
+    ];
+
+    // ═══════════════════════════════════════════════════════════════
+    //  STATE
+    // ═══════════════════════════════════════════════════════════════
+    let matchIndex = [];
+    let eventData = null;          // cached after first load
+    let loadPromise = null;          // dedup concurrent loads
+    let playerColors = {};            // uid → color string
+    let minimapCache = {};            // mapId → HTMLImageElement
+    let currentMapId = null;
+    let currentMatchId = null;
+    let currentProcessed = null;       // processed match data for re-renders
+
+    // View mode + timeline
+    let viewMode = 'paths';            // 'paths' | 'heatmap'
+    const timeline = {
+      minTs: 0,
+      maxTs: 0,
+      currentTs: 0,                    // absolute timestamp (ms)
+      playing: false,
+      rafId: null,
+      lastFrameTime: 0,
+      speed: 1,
+    };
+
+    // Toast emission cursor (index into currentProcessed.allMarkers)
+    let toastCursor = 0;
+
+    // Pan-drag state
+    let isPanning = false;
+    const panStart = { mx: 0, my: 0, offsetX: 0, offsetY: 0 };
+
+    // Zoom/pan viewport (applied to the canvas transform every draw)
+    const viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
+    const MIN_ZOOM = 1, MAX_ZOOM = 8;
+
+    function clampViewport() {
+      const W = canvas.width, H = canvas.height;
+      viewport.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, viewport.zoom));
+      const scaledW = W * viewport.zoom;
+      const scaledH = H * viewport.zoom;
+      // Keep the scaled canvas covering the view (no empty space)
+      viewport.offsetX = Math.min(0, Math.max(W - scaledW, viewport.offsetX));
+      viewport.offsetY = Math.min(0, Math.max(H - scaledH, viewport.offsetY));
+    }
+
+    function updateZoomLevelDisplay() {
+      const el = document.getElementById('zoom-level');
+      if (el) el.textContent = viewport.zoom.toFixed(1) + '×';
+    }
+
+    // Convert a client mouse event to canvas-space pixel coords (untransformed)
+    function clientToCanvas(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (clientX - rect.left) * (canvas.width / rect.width);
+      const my = (clientY - rect.top) * (canvas.height / rect.height);
+      return { x: mx, y: my };
+    }
+
+    // Convert canvas-space coords to world (pre-transform) pixel coords
+    function canvasToWorldPx(cx, cy) {
+      return {
+        x: (cx - viewport.offsetX) / viewport.zoom,
+        y: (cy - viewport.offsetY) / viewport.zoom,
+      };
+    }
+
+    // Zoom toward a canvas-space focus point (cx, cy)
+    function zoomAt(cx, cy, factor) {
+      const oldZoom = viewport.zoom;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * factor));
+      if (newZoom === oldZoom) return;
+      // Point under cursor (in world px) should remain fixed on screen
+      const wx = (cx - viewport.offsetX) / oldZoom;
+      const wy = (cy - viewport.offsetY) / oldZoom;
+      viewport.zoom = newZoom;
+      viewport.offsetX = cx - wx * newZoom;
+      viewport.offsetY = cy - wy * newZoom;
+      clampViewport();
+      updateZoomLevelDisplay();
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    }
+
+    function resetZoom() {
+      viewport.zoom = 1;
+      viewport.offsetX = 0;
+      viewport.offsetY = 0;
+      updateZoomLevelDisplay();
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    }
+
+    // Focus the viewport on a world-pixel rect (in 1024 coord space), centering with given zoom
+    function focusWorldCell(col, row, zoomLevel = 3) {
+      const W = canvas.width, H = canvas.height;
+      const cellSize = 1024 / 16;
+      // World pixel coords of the cell center, mapped to current canvas size
+      const wxCenter = ((col + 0.5) * cellSize / 1024) * W;
+      const wyCenter = ((row + 0.5) * cellSize / 1024) * H;
+      viewport.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevel));
+      viewport.offsetX = W / 2 - wxCenter * viewport.zoom;
+      viewport.offsetY = H / 2 - wyCenter * viewport.zoom;
+      clampViewport();
+      updateZoomLevelDisplay();
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    }
+
+    // Heatmap palettes (lazily generated 256-entry RGBA LUTs)
+    const HEAT_PALETTES = {};
+    function getPalette(name) {
+      if (HEAT_PALETTES[name]) return HEAT_PALETTES[name];
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 1;
+      const cc = c.getContext('2d');
+      const grad = cc.createLinearGradient(0, 0, 256, 0);
+      if (name === 'rainbow') {
+        grad.addColorStop(0.00, '#0040ff');
+        grad.addColorStop(0.30, '#00d0ff');
+        grad.addColorStop(0.55, '#00ff66');
+        grad.addColorStop(0.75, '#ffe600');
+        grad.addColorStop(1.00, '#ff0000');
+      } else if (name === 'red') {
+        grad.addColorStop(0.0, '#5a0000');
+        grad.addColorStop(0.5, '#cc1f1f');
+        grad.addColorStop(1.0, '#ff5a5a');
+      } else if (name === 'orange') {
+        grad.addColorStop(0.0, '#662200');
+        grad.addColorStop(0.5, '#ff8c00');
+        grad.addColorStop(1.0, '#ffa940');
+      } else if (name === 'purple') {
+        grad.addColorStop(0.0, '#3a1660');
+        grad.addColorStop(0.5, '#8a4dd9');
+        grad.addColorStop(1.0, '#d2a8ff');
+      }
+      cc.fillStyle = grad;
+      cc.fillRect(0, 0, 256, 1);
+      HEAT_PALETTES[name] = cc.getImageData(0, 0, 256, 1).data;
+      return HEAT_PALETTES[name];
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  DOM REFS
+    // ═══════════════════════════════════════════════════════════════
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const wrap = document.getElementById('canvas-wrap');
+    const overlay = document.getElementById('canvas-overlay');
+    const tooltip = document.getElementById('tooltip');
+    const selMap = document.getElementById('sel-map');
+    const selDate = document.getElementById('sel-date');
+    const selMatch = document.getElementById('sel-match');
+    const indexPill = document.getElementById('index-pill');
+    const serverWarn = document.getElementById('server-warning');
+
+    // Path-mode toggles
+    const TOG = {
+      humanPath: document.getElementById('tog-human-path'),
+      botPath: document.getElementById('tog-bot-path'),
+      loot: document.getElementById('tog-loot'),
+      kills: document.getElementById('tog-kills'),
+      deaths: document.getElementById('tog-deaths'),
+      storm: document.getElementById('tog-storm'),
+    };
+
+    // Heatmap-mode toggles
+    const HEAT = {
+      traffic: document.getElementById('tog-heat-traffic'),
+      kills: document.getElementById('tog-heat-kills'),
+      deaths: document.getElementById('tog-heat-deaths'),
+    };
+
+    // Toast container
+    const eventToastsEl = document.getElementById('event-toasts');
+
+    // Timeline + view mode controls
+    const playBtn = document.getElementById('play-btn');
+    const timeSlider = document.getElementById('time-slider');
+    const timeDisplay = document.getElementById('time-display');
+    const timeCurrentEl = timeDisplay.querySelector('.current');
+    const timeTotalEl = timeDisplay.querySelector('.total');
+    const sliderFill = document.getElementById('slider-fill');
+    const speedSelect = document.getElementById('speed-select');
+    const viewSeg = document.getElementById('view-seg');
+    const pathsPanel = document.getElementById('paths-panel');
+    const heatmapPanel = document.getElementById('heatmap-panel');
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CANVAS SIZING  — square, fills available space
+    // ═══════════════════════════════════════════════════════════════
+    function resizeCanvas() {
+      const w = wrap.clientWidth - 32;
+      const h = wrap.clientHeight - 32;
+      const size = Math.min(w, h, 900);
+      canvas.width = size;
+      canvas.height = size;
+      if (currentProcessed && currentMapId) {
+        drawMatch(currentMapId, currentProcessed);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // ═══════════════════════════════════════════════════════════════
+    //  OVERLAY HELPERS
+    // ═══════════════════════════════════════════════════════════════
+    function showOverlay(html) {
+      overlay.innerHTML = html;
+      overlay.classList.remove('hidden');
+    }
+    function hideOverlay() {
+      overlay.classList.add('hidden');
+    }
+    function showSpinner(msg) {
+      showOverlay(`<div class="spinner"></div>
+    <div class="overlay-msg"><p>${msg}</p></div>`);
+    }
+    function showPlaceholder() {
+      showOverlay(`<div class="overlay-msg">
+    <div class="icon">🗺</div>
+    <p>Select a map, date, and match<br>to view the replay.</p>
+  </div>`);
+    }
+    function showError(msg) {
+      showOverlay(`<div class="overlay-msg">
+    <div class="icon">⚠️</div>
+    <p>${msg}</p>
+  </div>`);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════════════════════
+    async function init() {
+      resizeCanvas();
+      showSpinner('Loading match index…');
+
+      try {
+        const resp = await fetch('output/matches_index.json');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        matchIndex = await resp.json();
+      } catch (e) {
+        if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+          serverWarn.style.display = 'block';
+        }
+        showError('Could not load matches_index.json.<br>Serve this folder via a local HTTP server:<br><code>python3 -m http.server 8080</code>');
+        indexPill.textContent = 'error';
+        return;
+      }
+
+      indexPill.textContent = `${matchIndex.length} matches`;
+      populateMapDropdown();
+      showPlaceholder();
+      await restoreFromUrl();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CASCADING DROPDOWNS
+    // ═══════════════════════════════════════════════════════════════
+    function populateMapDropdown() {
+      const maps = [...new Set(matchIndex.map(m => m.map_id))].sort();
+      selMap.innerHTML = '<option value="">— Select map —</option>' +
+        maps.map(id => `<option value="${id}">${id}</option>`).join('');
+      selMap.disabled = false;
+    }
+
+    selMap.addEventListener('change', () => {
+      const mapId = selMap.value;
+      selMatch.innerHTML = '<option value="">— Select match —</option>';
+      selMatch.disabled = true;
+
+      if (!mapId) {
+        selDate.innerHTML = '<option value="">— Select date —</option>';
+        selDate.disabled = true;
+        return;
+      }
+      const dates = [...new Set(
+        matchIndex.filter(m => m.map_id === mapId).map(m => m.date)
+      )].sort();
+      selDate.innerHTML = '<option value="">— Select date —</option>' +
+        dates.map(d => `<option value="${d}">${d}</option>`).join('');
+      selDate.disabled = false;
+    });
+
+    selDate.addEventListener('change', () => {
+      const mapId = selMap.value;
+      const date = selDate.value;
+      if (!date) { selMatch.innerHTML = '<option value="">— Select match —</option>'; selMatch.disabled = true; return; }
+
+      const matches = matchIndex
+        .filter(m => m.map_id === mapId && m.date === date)
+        .sort((a, b) => a.match_id.localeCompare(b.match_id));
+
+      selMatch.innerHTML = '<option value="">— Select match —</option>' +
+        matches.map(m => {
+          const short = m.match_id.slice(0, 8);
+          // player_count in the index is ALL unique user_ids (humans + bots);
+          // subtract bot_count to get the real human count for display.
+          const humanCount = m.player_count - (m.bot_count || 0);
+          const humanStr = humanCount > 0 ? `${humanCount}👤` : '';
+          const botStr = m.bot_count ? `${m.bot_count}🤖` : '';
+          const players = [humanStr, botStr].filter(Boolean).join(' · ');
+          return `<option value="${m.match_id}">#${short} — ${players} · ${m.event_count} evts</option>`;
+        }).join('');
+      selMatch.disabled = false;
+    });
+
+    selMatch.addEventListener('change', async () => {
+      const matchId = selMatch.value;
+      if (!matchId) return;
+      currentMapId = selMap.value;
+      currentMatchId = matchId;
+      await renderMatch(currentMapId, matchId);
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    //  TOGGLE REDRAW
+    // ═══════════════════════════════════════════════════════════════
+    const allToggles = [...Object.values(TOG), ...Object.values(HEAT)];
+    allToggles.forEach(tog =>
+      tog.addEventListener('change', () => {
+        if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+      })
+    );
+
+    // ═══════════════════════════════════════════════════════════════
+    //  VIEW MODE SWITCH
+    // ═══════════════════════════════════════════════════════════════
+    viewSeg.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-mode]');
+      if (!btn) return;
+      const mode = btn.dataset.mode;
+      if (mode === viewMode) return;
+
+      viewMode = mode;
+      viewSeg.querySelectorAll('button').forEach(b =>
+        b.classList.toggle('active', b.dataset.mode === mode)
+      );
+      pathsPanel.classList.toggle('hidden', mode !== 'paths');
+      heatmapPanel.classList.toggle('hidden', mode !== 'heatmap');
+
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    //  TIMELINE  (scrubbing + playback)
+    // ═══════════════════════════════════════════════════════════════
+    function updateTimeDisplay() {
+      const dur = timeline.maxTs - timeline.minTs;
+      const cur = timeline.currentTs - timeline.minTs;
+      timeCurrentEl.textContent = formatTime(cur);
+      timeTotalEl.textContent = formatTime(dur);
+      const pct = dur > 0 ? (cur / dur) * 100 : 0;
+      sliderFill.style.width = `${pct}%`;
+    }
+
+    function setTimelineFromSlider() {
+      const t = Number(timeSlider.value) / 1000;       // 0..1
+      timeline.currentTs = timeline.minTs + (timeline.maxTs - timeline.minTs) * t;
+      updateTimeDisplay();
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    }
+
+    timeSlider.addEventListener('input', () => {
+      stopPlayback();
+      playBtn.classList.remove('hint');
+      setTimelineFromSlider();
+    });
+
+    speedSelect.addEventListener('change', () => {
+      timeline.speed = Number(speedSelect.value);
+    });
+
+    playBtn.addEventListener('click', () => {
+      if (timeline.playing) stopPlayback();
+      else startPlayback();
+    });
+
+    // ── Event toast emission ──────────────────────────────────────
+    function buildToastMessage(ev) {
+      const uid = (ev.user_id || '').slice(0, 8);
+      const tag = ev.is_bot ? '🤖 Bot' : '👤 Player';
+      switch (ev.event) {
+        case 'Kill':
+        case 'BotKill': return {
+          icon: '💀', cls: 'kill',
+          html: `<span>${tag} <span class="who">${uid}</span> scored a kill</span>`
+        };
+        case 'Killed':
+        case 'BotKilled': return {
+          icon: '✕', cls: 'death',
+          html: `<span>${tag} <span class="who">${uid}</span> was eliminated</span>`
+        };
+        case 'KilledByStorm': return {
+          icon: '⚡', cls: 'storm',
+          html: `<span>${tag} <span class="who">${uid}</span> killed by the storm</span>`
+        };
+        case 'Loot': return {
+          icon: '📦', cls: 'loot',
+          html: `<span>${tag} <span class="who">${uid}</span> picked up loot</span>`
+        };
+        default: return null;
+      }
+    }
+
+    function shouldEmitToastFor(ev) {
+      // Respect path-mode toggles so toasts mirror what's visible
+      if (viewMode === 'paths') {
+        if (ev.event === 'Loot' && !TOG.loot.checked) return false;
+        if ((ev.event === 'Kill' || ev.event === 'BotKill') && !TOG.kills.checked) return false;
+        if ((ev.event === 'Killed' || ev.event === 'BotKilled') && !TOG.deaths.checked) return false;
+        if (ev.event === 'KilledByStorm' && !TOG.storm.checked) return false;
+      }
+      return true;
+    }
+
+    function emitEventToast(ev) {
+      if (!shouldEmitToastFor(ev)) return;
+      const msg = buildToastMessage(ev);
+      if (!msg) return;
+
+      const t = document.createElement('div');
+      t.className = `event-toast ${msg.cls}`;
+      t.innerHTML = `<span class="icon">${msg.icon}</span>${msg.html}`;
+      eventToastsEl.appendChild(t);
+
+      // Cap visible toasts
+      while (eventToastsEl.children.length > 5) {
+        eventToastsEl.firstChild.remove();
+      }
+      // Cleanup after fade-out animation completes
+      setTimeout(() => t.remove(), 3400);
+    }
+
+    function emitToastsUpTo(ts) {
+      if (!currentProcessed) return;
+      const arr = currentProcessed.allMarkers;
+      const MAX_PER_FRAME = 3;
+      let emitted = 0;
+      while (toastCursor < arr.length && arr[toastCursor].tsNum <= ts) {
+        if (emitted < MAX_PER_FRAME) {
+          emitEventToast(arr[toastCursor]);
+          emitted++;
+        }
+        toastCursor++;     // always advance so we don't get stuck
+      }
+    }
+
+    function clearAllToasts() {
+      eventToastsEl.innerHTML = '';
+    }
+
+    function startPlayback() {
+      if (!currentProcessed) return;
+      // Only rewind if already at the very end; otherwise resume from current position
+      if (timeline.currentTs >= timeline.maxTs) {
+        timeline.currentTs = timeline.minTs;
+        timeSlider.value = 0;
+        updateTimeDisplay();
+      }
+      timeline.playing = true;
+      playBtn.textContent = '❚❚';
+      playBtn.classList.add('playing');
+      playBtn.classList.remove('hint');
+      timeline.lastFrameTime = performance.now();
+      // Toast cursor: just ahead of current position so we don't replay old events
+      toastCursor = cutoffIndex(currentProcessed.allMarkers, timeline.currentTs);
+
+      const totalDur = timeline.maxTs - timeline.minTs;
+      // Aim to play full match in ~20 seconds at 1× speed
+      const baseRateMsPerSec = totalDur / 20;
+
+      const step = (now) => {
+        if (!timeline.playing) return;
+        const dt = (now - timeline.lastFrameTime) / 1000;
+        timeline.lastFrameTime = now;
+
+        timeline.currentTs += baseRateMsPerSec * timeline.speed * dt;
+        if (timeline.currentTs >= timeline.maxTs) {
+          timeline.currentTs = timeline.maxTs;
+          timeSlider.value = 1000;
+          emitToastsUpTo(timeline.currentTs);
+          updateTimeDisplay();
+          drawMatch(currentMapId, currentProcessed);
+          stopPlayback();
+          return;
+        }
+        timeSlider.value = ((timeline.currentTs - timeline.minTs) / totalDur) * 1000;
+        emitToastsUpTo(timeline.currentTs);
+        updateTimeDisplay();
+        drawMatch(currentMapId, currentProcessed);
+        timeline.rafId = requestAnimationFrame(step);
+      };
+      timeline.rafId = requestAnimationFrame(step);
+    }
+
+    function stopPlayback() {
+      timeline.playing = false;
+      playBtn.textContent = '▶';
+      playBtn.classList.remove('playing');
+      if (timeline.rafId) {
+        cancelAnimationFrame(timeline.rafId);
+        timeline.rafId = null;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  LOAD EVENT DATA  (gzip, cached after first fetch)
+    // ═══════════════════════════════════════════════════════════════
+    async function getEventData() {
+      if (eventData) return eventData;
+      if (loadPromise) return loadPromise;
+
+      loadPromise = (async () => {
+        showSpinner('Downloading event data…');
+        const resp = await fetch('output/events_by_map.json.gz');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching event data`);
+
+        showSpinner('Decompressing…');
+        const buf = await resp.arrayBuffer();
+        const str = pako.inflate(new Uint8Array(buf), { to: 'string' });
+
+        showSpinner('Parsing…');
+        eventData = JSON.parse(str);
+        loadPromise = null;
+        return eventData;
+      })();
+
+      return loadPromise;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  RENDER PIPELINE
+    // ═══════════════════════════════════════════════════════════════
+    async function renderMatch(mapId, matchId) {
+      stopPlayback();
+      clearAllToasts();
+      showSpinner('Loading…');
+      try {
+        const data = await getEventData();
+        const events = data[mapId]?.[matchId];
+        if (!events || events.length === 0) {
+          showError('No events found for this match.');
+          return;
+        }
+
+        currentProcessed = processMatch(events);
+        assignColors(currentProcessed.players);
+        updateStats(events, currentProcessed);
+        updateHotZones(mapId, currentProcessed.allMarkers);
+        updateActivityTimeline(currentProcessed.players);
+        updateLonelySummary();
+
+        // Default to END so the full match is visible before the user touches the timeline
+        timeline.minTs = currentProcessed.minTs;
+        timeline.maxTs = currentProcessed.maxTs;
+        timeline.currentTs = currentProcessed.maxTs;
+        timeSlider.value = 1000;
+        timeSlider.disabled = false;
+        playBtn.disabled = false;
+        speedSelect.disabled = false;
+        playBtn.classList.add('hint');     // pulse to draw attention
+        updateTimeDisplay();
+
+        await drawMatch(mapId, currentProcessed);
+        hideOverlay();
+      } catch (e) {
+        console.error(e);
+        if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+          serverWarn.style.display = 'block';
+          showError('Network error — serve files via:<br><code>python3 -m http.server 8080</code>');
+        } else {
+          showError(e.message);
+        }
+      }
+    }
+
+    // ── processMatch: group events per player ───────────────────────
+    function processMatch(events) {
+      const players = {};          // uid → { is_bot, positions[], markers[] }
+      const allMarkers = [];
+      const allPositions = [];     // for heatmap traffic aggregation
+      let minTs = Infinity, maxTs = -Infinity;
+
+      for (const ev of events) {
+        // Cache numeric timestamp so we don't reparse Date repeatedly
+        // The parquet ts column is timestamp[ms] but values are Unix seconds-scale,
+        // so getTime() returns seconds-as-ms. Multiply by 1000 to get real duration.
+        const tsNum = ev.ts ? new Date(ev.ts).getTime() * 1000 : 0;
+        ev.tsNum = tsNum;
+        if (tsNum < minTs) minTs = tsNum;
+        if (tsNum > maxTs) maxTs = tsNum;
+
+        const uid = ev.user_id;
+        if (!players[uid]) players[uid] = { is_bot: ev.is_bot, positions: [], markers: [] };
+
+        if (ev.event === 'Position' || ev.event === 'BotPosition') {
+          players[uid].positions.push(ev);
+          allPositions.push(ev);
+        } else {
+          players[uid].markers.push(ev);
+          allMarkers.push(ev);
+        }
+      }
+
+      // Sort everything by tsNum (binary-searchable for time filter)
+      for (const p of Object.values(players)) {
+        p.positions.sort((a, b) => a.tsNum - b.tsNum);
+        p.markers.sort((a, b) => a.tsNum - b.tsNum);
+      }
+      allMarkers.sort((a, b) => a.tsNum - b.tsNum);
+      allPositions.sort((a, b) => a.tsNum - b.tsNum);
+
+      if (!isFinite(minTs)) { minTs = 0; maxTs = 0; }
+      return { players, allMarkers, allPositions, minTs, maxTs };
+    }
+
+    // Binary search: largest index i such that arr[i].tsNum <= ts (returns count)
+    function cutoffIndex(arr, ts) {
+      let lo = 0, hi = arr.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid].tsNum <= ts) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    }
+
+    function formatTime(ms) {
+      if (!isFinite(ms) || ms < 0) ms = 0;
+      const total = Math.floor(ms / 1000);
+      const m = Math.floor(total / 60);
+      const s = total % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // ── assignColors: stable, per-session mapping ─────────────────
+    let humanColorIdx = 0;
+    let botColorIdx = 0;
+
+    function assignColors(players) {
+      for (const [uid, p] of Object.entries(players)) {
+        if (playerColors[uid]) continue;           // already assigned
+        if (p.is_bot) {
+          playerColors[uid] = BOT_COLORS[botColorIdx++ % BOT_COLORS.length];
+        } else {
+          playerColors[uid] = HUMAN_COLORS[humanColorIdx++ % HUMAN_COLORS.length];
+        }
+      }
+    }
+
+    // ── updateStats ───────────────────────────────────────────────
+    const togIncludePositions = document.getElementById('tog-include-positions');
+
+    function updateStats(events, { players, allMarkers, allPositions }) {
+      const humans = Object.values(players).filter(p => !p.is_bot).length;
+      const bots = Object.values(players).filter(p => p.is_bot).length;
+      const kills = allMarkers.filter(e => e.event === 'Kill' || e.event === 'BotKill').length;
+      const deaths = allMarkers.filter(e => e.event === 'Killed' || e.event === 'BotKilled').length;
+      const storm = allMarkers.filter(e => e.event === 'KilledByStorm').length;
+      const loot = allMarkers.filter(e => e.event === 'Loot').length;
+
+      const total = togIncludePositions.checked
+        ? events.length                                   // all records incl. positions
+        : allMarkers.length;                              // actionable events only
+
+      document.getElementById('stat-events').textContent = total.toLocaleString();
+      document.getElementById('stat-players').textContent = humans;
+      document.getElementById('stat-bots').textContent = bots;
+      document.getElementById('stat-kills').textContent = kills;
+      document.getElementById('stat-loot').textContent = loot;
+
+      // Path-layer counts
+      const humanPositions = Object.values(players).filter(p => !p.is_bot)
+        .reduce((n, p) => n + p.positions.length, 0);
+      const botPositions = Object.values(players).filter(p => p.is_bot)
+        .reduce((n, p) => n + p.positions.length, 0);
+      const setCnt = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n.toLocaleString(); };
+      setCnt('cnt-human-path', humanPositions);
+      setCnt('cnt-bot-path', botPositions);
+      setCnt('cnt-loot', loot);
+      setCnt('cnt-kills', kills);
+      setCnt('cnt-deaths', deaths);
+      setCnt('cnt-storm', storm);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  STAT DETAILS MODAL — shows the full list behind each stat box
+    // ═══════════════════════════════════════════════════════════════
+    const detailsModal = document.getElementById('details-modal');
+    const detailsBackdrop = document.getElementById('details-backdrop');
+    const detailsTitle = document.getElementById('details-title');
+    const detailsBody = document.getElementById('details-body');
+
+    function closeDetails() {
+      detailsModal.classList.remove('open');
+      detailsBackdrop.classList.remove('open');
+    }
+    document.getElementById('details-close').addEventListener('click', closeDetails);
+    detailsBackdrop.addEventListener('click', closeDetails);
+
+    function openDetails(title, items) {
+      detailsTitle.textContent = title;
+      if (items.length === 0) {
+        detailsBody.innerHTML = '<div style="color:var(--text-dim);padding:12px 4px">No items.</div>';
+      } else {
+        detailsBody.innerHTML = items.map(it => `
+      <div class="details-row" ${it.focus ? `data-col="${it.focus.col}" data-row="${it.focus.row}"` : ''}>
+        <span class="d-icon">${it.icon}</span>
+        <span class="d-who">${it.label}</span>
+        <span class="d-time">${it.time ?? ''}</span>
+      </div>`).join('');
+        // Clicking a row zooms into its cell
+        detailsBody.querySelectorAll('.details-row').forEach(row => {
+          if (row.dataset.col === undefined) return;
+          row.addEventListener('click', () => {
+            focusWorldCell(+row.dataset.col, +row.dataset.row, 4);
+          });
+        });
+      }
+      detailsBackdrop.classList.add('open');
+      detailsModal.classList.add('open');
+    }
+
+    function cellOfEvent(ev, mapId) {
+      const { x: px, y: py } = worldToCanvas(ev.x, ev.z, mapId, 1024, 1024);
+      const col = Math.max(0, Math.min(15, Math.floor(px / (1024 / 16))));
+      const row = Math.max(0, Math.min(15, Math.floor(py / (1024 / 16))));
+      return { col, row };
+    }
+
+    function buildStatDetails(kind) {
+      if (!currentProcessed || !currentMapId) return { title: 'Details', items: [] };
+      const { players, allMarkers } = currentProcessed;
+      const minTs = currentProcessed.minTs;
+      const rel = (ts) => '+' + formatTime((ts ?? 0) - minTs);
+
+      if (kind === 'kills') {
+        const rows = allMarkers
+          .filter(e => e.event === 'Kill' || e.event === 'BotKill')
+          .sort((a, b) => a.tsNum - b.tsNum)
+          .map(ev => ({
+            icon: '💀',
+            label: (ev.is_bot ? '🤖 ' : '👤 ') + ev.user_id.slice(0, 14) + '… got a kill',
+            time: rel(ev.tsNum),
+            focus: cellOfEvent(ev, currentMapId),
+          }));
+        return { title: `💀 Kills (${rows.length})`, items: rows };
+      }
+      if (kind === 'deaths') {
+        const rows = allMarkers
+          .filter(e => ['Killed', 'BotKilled', 'KilledByStorm'].includes(e.event))
+          .sort((a, b) => a.tsNum - b.tsNum)
+          .map(ev => ({
+            icon: ev.event === 'KilledByStorm' ? '⚡' : '✕',
+            label: (ev.is_bot ? '🤖 ' : '👤 ') + ev.user_id.slice(0, 14) + '… was ' + (ev.event === 'KilledByStorm' ? 'killed by storm' : 'killed'),
+            time: rel(ev.tsNum),
+            focus: cellOfEvent(ev, currentMapId),
+          }));
+        return { title: `✕ Deaths (${rows.length})`, items: rows };
+      }
+      if (kind === 'loot') {
+        const rows = allMarkers
+          .filter(e => e.event === 'Loot')
+          .sort((a, b) => a.tsNum - b.tsNum)
+          .map(ev => ({
+            icon: '📦',
+            label: (ev.is_bot ? '🤖 ' : '👤 ') + ev.user_id.slice(0, 14) + '… picked up loot',
+            time: rel(ev.tsNum),
+            focus: cellOfEvent(ev, currentMapId),
+          }));
+        return { title: `📦 Loot pickups (${rows.length})`, items: rows };
+      }
+      if (kind === 'players' || kind === 'bots') {
+        const wantBot = kind === 'bots';
+        const rows = Object.entries(players)
+          .filter(([, p]) => p.is_bot === wantBot)
+          .sort(([, a], [, b]) => (b.positions.length + b.markers.length) - (a.positions.length + a.markers.length))
+          .map(([uid, p]) => ({
+            icon: wantBot ? '🤖' : '👤',
+            label: uid,
+            time: `${p.positions.length + p.markers.length} evts`,
+          }));
+        return { title: `${wantBot ? '🤖 Bots' : '👤 Players'} (${rows.length})`, items: rows };
+      }
+      if (kind === 'events') {
+        // Compact view: show one row per marker type, count + latest time
+        const rows = allMarkers
+          .sort((a, b) => a.tsNum - b.tsNum)
+          .slice(0, 500)
+          .map(ev => ({
+            icon: eventIcon(ev.event),
+            label: (ev.is_bot ? '🤖 ' : '👤 ') + ev.user_id.slice(0, 14) + '…  ' + ev.event,
+            time: rel(ev.tsNum),
+            focus: cellOfEvent(ev, currentMapId),
+          }));
+        const title = `All events (${allMarkers.length})` + (allMarkers.length > 500 ? '  — showing first 500' : '');
+        return { title, items: rows };
+      }
+      return { title: 'Details', items: [] };
+    }
+
+    function wireStatClick(id, kind) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      // The clickable element is the parent .stat-box
+      const box = el.closest('.stat-box');
+      if (!box) return;
+      box.addEventListener('click', () => {
+        if (!currentProcessed) return;
+        const { title, items } = buildStatDetails(kind);
+        openDetails(title, items);
+      });
+    }
+    wireStatClick('stat-events', 'events');
+    wireStatClick('stat-players', 'players');
+    wireStatClick('stat-bots', 'bots');
+    wireStatClick('stat-kills', 'kills');
+    wireStatClick('stat-loot', 'loot');
+
+    togIncludePositions.addEventListener('change', () => {
+      if (currentProcessed) {
+        const data = eventData?.[currentMapId]?.[currentMatchId];
+        if (data) updateStats(data, currentProcessed);
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    //  DRAWING
+    // ═══════════════════════════════════════════════════════════════
+
+    // Load minimap image (cached)
+    function loadMinimap(mapId) {
+      if (minimapCache[mapId]) {
+        return Promise.resolve(minimapCache[mapId]);
+      }
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => { minimapCache[mapId] = img; resolve(img); };
+        img.onerror = () => reject(new Error(`Could not load minimap for ${mapId}`));
+        img.src = MAP_MINIMAP[mapId];
+      });
+    }
+
+    // Main draw function — dispatches on viewMode + applies time filter
+    async function drawMatch(mapId, processed) {
+      const W = canvas.width, H = canvas.height;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+
+      // Apply viewport (zoom/pan) transform for everything that follows
+      ctx.save();
+      ctx.translate(viewport.offsetX, viewport.offsetY);
+      ctx.scale(viewport.zoom, viewport.zoom);
+
+      // ── 1. Minimap background ──────────────────────────────────
+      try {
+        const img = await loadMinimap(mapId);
+        ctx.drawImage(img, 0, 0, W, H);
+      } catch {
+        ctx.fillStyle = '#1a2030';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#334';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('minimap not found', W / 2, H / 2);
+        ctx.textAlign = 'left';
+      }
+
+      // Dim background so overlays read clearly
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(0, 0, W, H);
+
+      if (viewMode === 'heatmap') {
+        drawHeatmapView(mapId, processed, W, H);
+      } else {
+        drawPathsView(mapId, processed, W, H);
+        // Draw lonely zones in paths view too (heatmap already draws them via patch)
+        const date = matchIndex.find(m => m.match_id === currentMatchId)?.date;
+        if (date) drawLonelyZones(mapId, date, W, H);
+      }
+
+      ctx.restore();
+    }
+
+    // ── PATHS VIEW ────────────────────────────────────────────────
+    function drawPathsView(mapId, { players, allMarkers }, W, H) {
+      const cutTs = timeline.currentTs || timeline.maxTs;
+
+      // Paths
+      for (const [uid, p] of Object.entries(players)) {
+        if (p.is_bot && !TOG.botPath.checked) continue;
+        if (!p.is_bot && !TOG.humanPath.checked) continue;
+        if (p.positions.length < 2) continue;
+
+        const limit = cutoffIndex(p.positions, cutTs);
+        if (limit < 2) continue;
+
+        const color = playerColors[uid] || '#888';
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = p.is_bot ? 1.2 : 1.8;
+        ctx.globalAlpha = p.is_bot ? 0.55 : 0.85;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        for (let i = 0; i < limit; i++) {
+          const pos = p.positions[i];
+          const { x, y } = worldToCanvas(pos.x, pos.z, mapId, W, H);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Start dot
+        const first = p.positions[0];
+        const { x: sx, y: sy } = worldToCanvas(first.x, first.z, mapId, W, H);
+        ctx.beginPath();
+        ctx.arc(sx, sy, p.is_bot ? 2.5 : 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        // "Now" cursor at last drawn position (only meaningful while scrubbing)
+        if (timeline.currentTs < timeline.maxTs && limit > 0) {
+          const last = p.positions[limit - 1];
+          const { x: lx, y: ly } = worldToCanvas(last.x, last.z, mapId, W, H);
+          ctx.beginPath();
+          ctx.arc(lx, ly, 5, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1.5;
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
+      // Filter markers by time
+      const markerLimit = cutoffIndex(allMarkers, cutTs);
+      const visible = allMarkers.slice(0, markerLimit);
+
+      const lootEvents = visible.filter(e => e.event === 'Loot');
+      const killEvents = visible.filter(e => e.event === 'Kill' || e.event === 'BotKill');
+      const deathEvents = visible.filter(e => e.event === 'Killed' || e.event === 'BotKilled');
+      const stormEvents = visible.filter(e => e.event === 'KilledByStorm');
+
+      // Loot
+      if (TOG.loot.checked) {
+        if (lootEvents.length > 250) {
+          ctx.fillStyle = 'rgba(63,185,80,0.7)';
+          for (const ev of lootEvents) {
+            const { x, y } = worldToCanvas(ev.x, ev.z, mapId, W, H);
+            ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+          }
+        } else {
+          ctx.font = '10px serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          for (const ev of lootEvents) {
+            const { x, y } = worldToCanvas(ev.x, ev.z, mapId, W, H);
+            ctx.fillText('📦', x, y);
+          }
+        }
+      }
+      // Kills
+      if (TOG.kills.checked) {
+        ctx.font = '14px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const ev of killEvents) {
+          const { x, y } = worldToCanvas(ev.x, ev.z, mapId, W, H);
+          ctx.fillText('💀', x, y);
+        }
+      }
+      // Deaths
+      if (TOG.deaths.checked) {
+        for (const ev of deathEvents) {
+          const { x, y } = worldToCanvas(ev.x, ev.z, mapId, W, H);
+          drawCross(x, y, 6, '#f85149', 2);
+        }
+      }
+      // Storm
+      if (TOG.storm.checked) {
+        ctx.font = '14px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const ev of stormEvents) {
+          const { x, y } = worldToCanvas(ev.x, ev.z, mapId, W, H);
+          ctx.fillText('⚡', x, y);
+        }
+      }
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+    }
+
+    // ── HEATMAP VIEW ──────────────────────────────────────────────
+    function drawHeatmapView(mapId, { allPositions, allMarkers }, W, H) {
+      const cutTs = timeline.currentTs || timeline.maxTs;
+
+      // Filter by time using binary search
+      const positions = allPositions.slice(0, cutoffIndex(allPositions, cutTs));
+      const markers = allMarkers.slice(0, cutoffIndex(allMarkers, cutTs));
+
+      const killPts = markers.filter(e => e.event === 'Kill' || e.event === 'BotKill');
+      const deathPts = markers.filter(e => e.event === 'Killed' || e.event === 'BotKilled' || e.event === 'KilledByStorm');
+
+      // Render layer order: traffic (large/under), then kills + deaths
+      if (HEAT.traffic.checked && positions.length > 0) {
+        drawHeatLayer(positions, mapId, W, H, 'rainbow', 16, 0.18);
+      }
+      if (HEAT.kills.checked && killPts.length > 0) {
+        drawHeatLayer(killPts, mapId, W, H, 'orange', 22, 0.5);
+      }
+      if (HEAT.deaths.checked && deathPts.length > 0) {
+        drawHeatLayer(deathPts, mapId, W, H, 'purple', 22, 0.5);
+      }
+
+      // If nothing toggled or no data → status text
+      if (!HEAT.traffic.checked && !HEAT.kills.checked && !HEAT.deaths.checked) {
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Enable a heatmap layer in the sidebar', W / 2, H / 2);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    // Render a single heatmap layer onto an offscreen canvas, colorize via palette,
+    // then composite onto the main ctx.
+    function drawHeatLayer(points, mapId, W, H, paletteName, radius, perPointAlpha) {
+      // 1. Alpha buffer via radial gradient blobs
+      const off = document.createElement('canvas');
+      off.width = W; off.height = H;
+      const oc = off.getContext('2d');
+      oc.globalCompositeOperation = 'lighter';
+
+      for (const pt of points) {
+        const { x, y } = worldToCanvas(pt.x, pt.z, mapId, W, H);
+        if (x < -radius || x > W + radius || y < -radius || y > H + radius) continue;
+        const grad = oc.createRadialGradient(x, y, 0, x, y, radius);
+        grad.addColorStop(0, `rgba(255,255,255,${perPointAlpha})`);
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        oc.fillStyle = grad;
+        oc.beginPath();
+        oc.arc(x, y, radius, 0, Math.PI * 2);
+        oc.fill();
+      }
+
+      // 2. Colorize — read alpha, write palette color
+      const img = oc.getImageData(0, 0, W, H);
+      const d = img.data;
+      const pal = getPalette(paletteName);
+      for (let i = 0; i < d.length; i += 4) {
+        const a = d[i + 3];
+        if (a === 0) continue;
+        const idx = (a > 255 ? 255 : a) * 4;
+        d[i] = pal[idx];
+        d[i + 1] = pal[idx + 1];
+        d[i + 2] = pal[idx + 2];
+        // Boost alpha slightly so faint cells still register
+        d[i + 3] = Math.min(255, Math.round(a * 1.4));
+      }
+      oc.putImageData(img, 0, 0);
+
+      // 3. Composite onto main canvas
+      ctx.drawImage(off, 0, 0);
+    }
+
+    // Draw a ✕ cross
+    function drawCross(cx, cy, r, color, lw) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lw;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
+      ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  TOOLTIP  — shows event info on hover
+    // ═══════════════════════════════════════════════════════════════
+    canvas.addEventListener('mousemove', (e) => {
+      if (!currentProcessed || !currentMapId) return;
+      if (isPanning) return;            // no hover while dragging
+      const rect = canvas.getBoundingClientRect();
+      // Convert client → canvas → world (reverse the viewport transform)
+      const { x: cx, y: cy } = clientToCanvas(e.clientX, e.clientY);
+      const { x: mx, y: my } = canvasToWorldPx(cx, cy);
+      // Make hit radius scale with zoom so the "feel" is constant
+      const HIT = 16 / viewport.zoom;
+
+      let found = null;
+      for (const ev of currentProcessed.allMarkers) {
+        const { x, y } = worldToCanvas(ev.x, ev.z, currentMapId, canvas.width, canvas.height);
+        if (Math.abs(x - mx) < HIT && Math.abs(y - my) < HIT) { found = ev; break; }
+      }
+
+      if (found) {
+        const icon = eventIcon(found.event);
+        const uid = found.user_id.slice(0, 16) + '…';
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${e.clientX - rect.left + 14}px`;
+        tooltip.style.top = `${e.clientY - rect.top - 10}px`;
+        const relMs = (found.tsNum ?? 0) - (timeline.minTs ?? 0);
+        const relStr = relMs > 0 ? `+${formatTime(relMs)}` : formatTime(0);
+        const dateStr = found.date ?? '';
+        tooltip.innerHTML = `<strong>${icon} ${found.event}</strong><br>${uid}<br><span style="color:var(--text-dim)">${dateStr}  ${relStr} into match</span>`;
+      } else {
+        tooltip.style.display = 'none';
+      }
+    });
+    canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ZOOM / PAN — wheel, button and drag handlers
+    // ═══════════════════════════════════════════════════════════════
+    canvas.addEventListener('wheel', (e) => {
+      if (!currentProcessed) return;
+      e.preventDefault();
+      const { x: cx, y: cy } = clientToCanvas(e.clientX, e.clientY);
+      const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+      zoomAt(cx, cy, factor);
+    }, { passive: false });
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (viewport.zoom <= 1) return;  // nothing to pan
+      isPanning = true;
+      const { x, y } = clientToCanvas(e.clientX, e.clientY);
+      panStart.mx = x;
+      panStart.my = y;
+      panStart.offsetX = viewport.offsetX;
+      panStart.offsetY = viewport.offsetY;
+      canvas.style.cursor = 'grabbing';
+      tooltip.style.display = 'none';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      const { x, y } = clientToCanvas(e.clientX, e.clientY);
+      viewport.offsetX = panStart.offsetX + (x - panStart.mx);
+      viewport.offsetY = panStart.offsetY + (y - panStart.my);
+      clampViewport();
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!isPanning) return;
+      isPanning = false;
+      canvas.style.cursor = '';
+    });
+
+    // Double-click to zoom in toward cursor; shift+dblclick to zoom out
+    canvas.addEventListener('dblclick', (e) => {
+      if (!currentProcessed) return;
+      const { x: cx, y: cy } = clientToCanvas(e.clientX, e.clientY);
+      zoomAt(cx, cy, e.shiftKey ? 1 / 1.7 : 1.7);
+    });
+
+    document.getElementById('zoom-in').addEventListener('click', () => zoomAt(canvas.width / 2, canvas.height / 2, 1.4));
+    document.getElementById('zoom-out').addEventListener('click', () => zoomAt(canvas.width / 2, canvas.height / 2, 1 / 1.4));
+    document.getElementById('zoom-reset').addEventListener('click', resetZoom);
+
+    // Cursor hint: grab when zoomed
+    const updateCanvasCursor = () => {
+      if (isPanning) return;
+      canvas.style.cursor = viewport.zoom > 1 ? 'grab' : '';
+    };
+    canvas.addEventListener('mousemove', updateCanvasCursor);
+
+    function eventIcon(ev) {
+      if (ev === 'Kill' || ev === 'BotKill') return '💀';
+      if (ev === 'Killed' || ev === 'BotKilled') return '✕';
+      if (ev === 'KilledByStorm') return '⚡';
+      if (ev === 'Loot') return '📦';
+      return '•';
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  HOT ZONES  — top-3 kill-dense grid cells in this match
+    // ═══════════════════════════════════════════════════════════════
+    const GRID_N = 16;   // 16×16 cells over the 1024 pixel space
+
+    function cellLabel(col, row) {
+      return `${String.fromCharCode(65 + col)}${row + 1}`;
+    }
+
+    function buildGrid(events, mapId) {
+      const grid = {};
+      for (const ev of events) {
+        const { x: px, y: py } = worldToCanvas(ev.x, ev.z, mapId, 1024, 1024);
+        const col = Math.max(0, Math.min(GRID_N - 1, Math.floor(px / (1024 / GRID_N))));
+        const row = Math.max(0, Math.min(GRID_N - 1, Math.floor(py / (1024 / GRID_N))));
+        const k = col * GRID_N + row;
+        grid[k] = (grid[k] || { col, row, count: 0 });
+        grid[k].count++;
+      }
+      return grid;
+    }
+
+    function computeHotZones(allMarkers, mapId) {
+      const combatEvents = allMarkers.filter(e =>
+        ['Kill', 'BotKill', 'Killed', 'BotKilled', 'KilledByStorm'].includes(e.event)
+      );
+      if (combatEvents.length === 0) return [];
+      const grid = buildGrid(combatEvents, mapId);
+      return Object.values(grid)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3)
+        .map(({ col, row, count }) => ({ col, row, count, label: cellLabel(col, row) }));
+    }
+
+    function updateHotZones(mapId, allMarkers) {
+      const el = document.getElementById('hotzone-list');
+      const zones = computeHotZones(allMarkers, mapId);
+      if (zones.length === 0) {
+        el.innerHTML = '<div style="color:var(--text-dim);font-size:12px">No combat events</div>';
+        return;
+      }
+      const rankClass = ['rank-1', 'rank-2', 'rank-3'];
+      el.innerHTML = zones.map(({ label, count, col, row }, i) => `
+    <div class="hotzone-item" data-col="${col}" data-row="${row}" title="Click to zoom into zone ${label}">
+      <div class="hotzone-badge ${rankClass[i]}">${'ABC'[i]}</div>
+      <span class="hotzone-grid">Zone ${label}</span>
+      <span class="hotzone-count">${count} kills/deaths</span>
+    </div>`).join('');
+      // Click → zoom into that grid cell
+      el.querySelectorAll('.hotzone-item').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', () => {
+          const col = +item.dataset.col;
+          const row = +item.dataset.row;
+          focusWorldCell(col, row, 3.5);
+        });
+      });
+    }
+
+    // Draw hot-zone labels onto the canvas (called from drawMatch when in heatmap mode)
+    function drawHotZoneLabels(zones, mapId, W, H) {
+      const cellW = W / GRID_N;
+      const cellH = H / GRID_N;
+      zones.forEach(({ col, row, count, label }, i) => {
+        const x = col * cellW + cellW / 2;
+        const y = row * cellH + cellH / 2;
+        const colors = ['#f85149', '#fd7e14', '#e3b341'];
+        const c = colors[i];
+        // Glow ring
+        ctx.beginPath();
+        ctx.arc(x, y, 18, 0, Math.PI * 2);
+        ctx.strokeStyle = c;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.8;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Letter badge
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(x, y - 10, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = i === 2 ? '#000' : '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('ABC'[i], x, y - 10);
+        // Count label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(`${count}`, x, y + 3);
+        ctx.shadowBlur = 0;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ACTIVITY TIMELINE  (Gantt-style per-player activity bars)
+    // ═══════════════════════════════════════════════════════════════
+    function updateActivityTimeline(players) {
+      const el = document.getElementById('activity-timeline');
+      const includeBots = document.getElementById('tog-timeline-bots')?.checked ?? true;
+      const matchDur = currentProcessed ? currentProcessed.maxTs - currentProcessed.minTs : 0;
+      const minTs = currentProcessed ? currentProcessed.minTs : 0;
+
+      if (matchDur <= 0) {
+        el.innerHTML = '<div style="color:var(--text-dim);font-size:12px">No data</div>';
+        return;
+      }
+
+      const rows = [];
+      for (const [uid, p] of Object.entries(players)) {
+        if (!includeBots && p.is_bot) continue;
+        const all = [...p.positions, ...p.markers].sort((a, b) => a.tsNum - b.tsNum);
+        if (all.length === 0) continue;
+        const firstTs = all[0].tsNum;
+        const lastTs = all[all.length - 1].tsNum;
+        const fate = p.markers.find(e => ['Killed', 'BotKilled', 'KilledByStorm'].includes(e.event));
+        rows.push({ uid, is_bot: p.is_bot, firstTs, lastTs, fate: fate?.event ?? null });
+      }
+
+      if (rows.length === 0) {
+        el.innerHTML = '<div style="color:var(--text-dim);font-size:12px">No data</div>';
+        return;
+      }
+
+      // Sort by entry time (earliest first)
+      rows.sort((a, b) => a.firstTs - b.firstTs);
+
+      const fateIcon = { Killed: '✕', BotKilled: '✕', KilledByStorm: '⚡' };
+
+      // Build time axis labels (0%, 25%, 50%, 75%, 100%)
+      const axisHtml = `
+  <div class="at-axis">
+    <span>0</span>
+    <span>${formatTime(matchDur * 0.25)}</span>
+    <span>${formatTime(matchDur * 0.5)}</span>
+    <span>${formatTime(matchDur * 0.75)}</span>
+    <span>${formatTime(matchDur)}</span>
+  </div>`;
+
+      const rowsHtml = rows.map(({ uid, is_bot, firstTs, lastTs, fate }) => {
+        const color = playerColors[uid] || (is_bot ? 'var(--bot)' : 'var(--human)');
+        const leftPct = ((firstTs - minTs) / matchDur * 100).toFixed(1);
+        const widthPct = Math.max(0.5, (lastTs - firstTs) / matchDur * 100).toFixed(1);
+        const tag = is_bot ? '🤖' : '👤';
+        const icon = fateIcon[fate] ?? '🏆';
+        const dur = formatTime(lastTs - firstTs);
+        const shortId = uid.length > 8 ? uid.slice(0, 8) + '…' : uid;
+        return `
+    <div class="at-row" title="${uid}  |  ${dur}  |  entered ${formatTime(firstTs - minTs)} in">
+      <span class="at-label">${tag} ${shortId}</span>
+      <div class="at-track">
+        <div class="at-bar" style="left:${leftPct}%;width:${widthPct}%;background:${color}"></div>
+      </div>
+      <span class="at-fate">${icon}</span>
+      <span class="at-dur">${dur}</span>
+    </div>`;
+      }).join('');
+
+      el.innerHTML = axisHtml + rowsHtml;
+    }
+
+    document.getElementById('tog-timeline-bots').addEventListener('change', () => {
+      if (currentProcessed) updateActivityTimeline(currentProcessed.players);
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    //  LONELY ZONES  — grid cells with zero events across the whole day
+    // ═══════════════════════════════════════════════════════════════
+    const togLonely = document.getElementById('tog-lonely');
+    const lonelyThreshold = document.getElementById('lonely-threshold');
+    const lonelyThreshVal = document.getElementById('lonely-threshold-val');
+    const lonelySummary = document.getElementById('lonely-summary');
+
+    // Memoise day-wide grid counts so threshold changes are instant
+    let _lonelyCache = null;  // { key, counts: Map<cellIdx, count> }
+
+    function computeDayGridCounts(mapId, date) {
+      const key = `${mapId}::${date}`;
+      if (_lonelyCache && _lonelyCache.key === key) return _lonelyCache.counts;
+      const counts = new Map();
+      if (!eventData) { _lonelyCache = { key, counts }; return counts; }
+      const matchIds = matchIndex
+        .filter(m => m.map_id === mapId && m.date === date)
+        .map(m => m.match_id);
+      for (const matchId of matchIds) {
+        for (const ev of (eventData[mapId]?.[matchId] ?? [])) {
+          const { x: px, y: py } = worldToCanvas(ev.x, ev.z, mapId, 1024, 1024);
+          const col = Math.max(0, Math.min(GRID_N - 1, Math.floor(px / (1024 / GRID_N))));
+          const row = Math.max(0, Math.min(GRID_N - 1, Math.floor(py / (1024 / GRID_N))));
+          const k = col * GRID_N + row;
+          counts.set(k, (counts.get(k) || 0) + 1);
+        }
+      }
+      _lonelyCache = { key, counts };
+      return counts;
+    }
+
+    function computeLonelyZones(mapId, date, threshold = 0) {
+      const counts = computeDayGridCounts(mapId, date);
+      const lonely = [];
+      for (let col = 0; col < GRID_N; col++)
+        for (let row = 0; row < GRID_N; row++) {
+          const n = counts.get(col * GRID_N + row) || 0;
+          if (n <= threshold) lonely.push({ col, row, count: n });
+        }
+      return lonely;
+    }
+
+    function drawLonelyZones(mapId, date, W, H) {
+      if (!togLonely.checked) return;
+      const threshold = +(lonelyThreshold?.value ?? 0);
+      const zones = computeLonelyZones(mapId, date, threshold);
+      const cellW = W / GRID_N;
+      const cellH = H / GRID_N;
+
+      ctx.save();
+      // Soft fill — lighter if cell has some activity, darker if completely dead
+      for (const { col, row, count } of zones) {
+        const alpha = count === 0 ? 0.45 : 0.22;
+        ctx.fillStyle = `rgba(60,75,110,${alpha})`;
+        ctx.fillRect(col * cellW, row * cellH, cellW, cellH);
+      }
+      // Diagonal stripes for visual texture
+      ctx.strokeStyle = 'rgba(140,160,200,0.22)';
+      ctx.lineWidth = 0.6;
+      for (const { col, row } of zones) {
+        const x = col * cellW, y = row * cellH;
+        for (let d = -cellW; d < cellW * 2; d += 6) {
+          ctx.beginPath();
+          ctx.moveTo(x + d, y); ctx.lineTo(x + d + cellH, y + cellH);
+          ctx.stroke();
+        }
+      }
+      // Subtle outline so cell borders are visible
+      ctx.strokeStyle = 'rgba(100,120,160,0.35)';
+      ctx.lineWidth = 0.75;
+      for (const { col, row } of zones) {
+        ctx.strokeRect(col * cellW + 0.5, row * cellH + 0.5, cellW - 1, cellH - 1);
+      }
+      ctx.restore();
+    }
+
+    function updateLonelySummary() {
+      if (!currentMapId) { lonelySummary.textContent = 'Aggregates the whole day\'s events into a 16×16 grid.'; return; }
+      const date = matchIndex.find(m => m.match_id === currentMatchId)?.date;
+      if (!date) return;
+      const threshold = +(lonelyThreshold?.value ?? 0);
+      const zones = computeLonelyZones(currentMapId, date, threshold);
+      const total = GRID_N * GRID_N;
+      const pct = Math.round((zones.length / total) * 100);
+      const fully = zones.filter(z => z.count === 0).length;
+      lonelySummary.textContent =
+        `${zones.length}/${total} cells (${pct}%) have ≤ ${threshold} events` +
+        (threshold > 0 ? `  ·  ${fully} completely empty` : '');
+    }
+
+    togLonely.addEventListener('change', () => {
+      updateLonelySummary();
+      if (currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    });
+    lonelyThreshold.addEventListener('input', () => {
+      lonelyThreshVal.textContent = lonelyThreshold.value;
+      updateLonelySummary();
+      if (togLonely.checked && currentProcessed && currentMapId) drawMatch(currentMapId, currentProcessed);
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    //  SHARE A MOMENT  — encode state into URL hash
+    // ═══════════════════════════════════════════════════════════════
+    const shareBtn = document.getElementById('share-btn');
+
+    shareBtn.addEventListener('click', () => {
+      if (!currentMapId || !currentMatchId) return;
+      const dur = timeline.maxTs - timeline.minTs;
+      const t = dur > 0 ? ((timeline.currentTs - timeline.minTs) / dur).toFixed(4) : '1';
+      const hash = new URLSearchParams({ map: currentMapId, match: currentMatchId, t }).toString();
+      const url = `${location.origin}${location.pathname}#${hash}`;
+      navigator.clipboard.writeText(url).then(() => {
+        shareBtn.textContent = '✓ Copied!';
+        shareBtn.classList.add('copied');
+        setTimeout(() => { shareBtn.textContent = '🔗 Copy Link'; shareBtn.classList.remove('copied'); }, 2200);
+      });
+    });
+
+    async function restoreFromUrl() {
+      const hash = location.hash.slice(1);
+      if (!hash) return;
+      const p = new URLSearchParams(hash);
+      const mapId = p.get('map');
+      const matchId = p.get('match');
+      const t = parseFloat(p.get('t') ?? '1');
+      if (!mapId || !matchId) return;
+
+      const entry = matchIndex.find(m => m.match_id === matchId && m.map_id === mapId);
+      if (!entry) return;
+
+      selMap.value = mapId;
+      selMap.dispatchEvent(new Event('change'));
+      selDate.value = entry.date;
+      selDate.dispatchEvent(new Event('change'));
+      selMatch.value = matchId;
+
+      await renderMatch(mapId, matchId);
+
+      const dur = timeline.maxTs - timeline.minTs;
+      timeline.currentTs = timeline.minTs + dur * Math.min(1, Math.max(0, t));
+      timeSlider.value = Math.round(Math.min(1, Math.max(0, t)) * 1000);
+      updateTimeDisplay();
+      drawMatch(mapId, currentProcessed);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  HOOK NEW FEATURES INTO EXISTING PIPELINE
+    // ═══════════════════════════════════════════════════════════════
+
+    // Patch renderMatch to also update activity timeline + hot zones
+    const _origRender = renderMatch;  // eslint-disable-line
+    // (Already merged inline below — see the updateStats call chain)
+
+    // Patch drawHeatmapView to draw lonely zones + hot-zone labels
+    const _origDrawHeatmapView = drawHeatmapView;
+    window.drawHeatmapView = function (mapId, processed, W, H) {
+      _origDrawHeatmapView(mapId, processed, W, H);
+      const date = matchIndex.find(m => m.match_id === currentMatchId)?.date;
+      if (date) drawLonelyZones(mapId, date, W, H);
+      const zones = computeHotZones(processed.allMarkers, mapId);
+      if (zones.length) drawHotZoneLabels(zones, mapId, W, H);
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    //  START
+    // ═══════════════════════════════════════════════════════════════
+    init();
+  </script>
+</body>
+
+</html>

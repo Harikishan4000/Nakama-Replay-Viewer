@@ -1,0 +1,39 @@
+# Netlify configuration for Nakama Replay Viewer
+
+[build]
+  # The folder to deploy
+  publish = "public"
+
+  # No build command needed — it's a static site
+  command = ""
+
+# Cache configuration
+[build.environment]
+  NODE_VERSION = "18"
+
+# Redirect rules for SPA (if needed for future expansion)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for performance and caching
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "max-age=3600, public"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "max-age=0, no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "max-age=86400, public"
+
+[[headers]]
+  for = "/minimaps/*"
+  [headers.values]
+    Cache-Control = "max-age=604800, public"

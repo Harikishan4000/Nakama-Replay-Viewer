@@ -1,0 +1,22 @@
+# Raw parquet data files (huge, don't commit)
+February_*/
+
+# Generated output (keep processed files)
+# But exclude intermediate files if needed
+*.parquet
+*.parquet-0
+
+# OS files
+.DS_Store
+.env
+.env.local
+.env.*.local
+
+# Development
+node_modules/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
