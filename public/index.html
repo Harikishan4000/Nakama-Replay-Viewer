@@ -1536,7 +1536,7 @@
       showSpinner('Loading match index…');
 
       try {
-        const resp = await fetch('output/matches_index.json');
+        const resp = await fetch('data/matches_index.json');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         matchIndex = await resp.json();
       } catch (e) {
@@ -1813,7 +1813,7 @@
 
       loadPromise = (async () => {
         showSpinner('Downloading event data…');
-        const resp = await fetch('output/events_by_map.json.gz');
+        const resp = await fetch('data/events_by_map.json.gz');
         if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching event data`);
 
         showSpinner('Decompressing…');
