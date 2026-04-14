@@ -2349,15 +2349,29 @@
       const killPts = markers.filter(e => e.event === 'Kill' || e.event === 'BotKill');
       const deathPts = markers.filter(e => e.event === 'Killed' || e.event === 'BotKilled' || e.event === 'KilledByStorm');
 
+      // In daily mode, scale alpha down proportionally to avoid saturation from
+      // many matches stacking up — sqrt scaling keeps sparse areas visible.
+      const isDaily = HEAT.daily.checked;
+      const trafficAlpha = isDaily
+        ? Math.max(0.005, 0.18 * Math.sqrt(600 / Math.max(positions.length, 600)))
+        : 0.18;
+      const trafficRadius = isDaily ? 13 : 16;
+      const killAlpha = isDaily
+        ? Math.max(0.04, 0.5 * Math.sqrt(50 / Math.max(killPts.length, 50)))
+        : 0.5;
+      const deathAlpha = isDaily
+        ? Math.max(0.04, 0.5 * Math.sqrt(50 / Math.max(deathPts.length, 50)))
+        : 0.5;
+
       // Render layer order: traffic (large/under), then kills + deaths
       if (HEAT.traffic.checked && positions.length > 0) {
-        drawHeatLayer(positions, mapId, W, H, 'rainbow', 16, 0.18);
+        drawHeatLayer(positions, mapId, W, H, 'rainbow', trafficRadius, trafficAlpha);
       }
       if (HEAT.kills.checked && killPts.length > 0) {
-        drawHeatLayer(killPts, mapId, W, H, 'orange', 22, 0.5);
+        drawHeatLayer(killPts, mapId, W, H, 'orange', 22, killAlpha);
       }
       if (HEAT.deaths.checked && deathPts.length > 0) {
-        drawHeatLayer(deathPts, mapId, W, H, 'purple', 22, 0.5);
+        drawHeatLayer(deathPts, mapId, W, H, 'purple', 22, deathAlpha);
       }
 
       // If nothing toggled or no data → status text
@@ -2391,19 +2405,32 @@
         oc.fill();
       }
 
-      // 2. Colorize — read alpha, write palette color
+      // 2. Normalize + Colorize
+      // First, find the actual max alpha so we can rescale the full palette range
+      // regardless of how many points were drawn (prevents daily-mode saturation).
       const img = oc.getImageData(0, 0, W, H);
       const d = img.data;
       const pal = getPalette(paletteName);
+
+      let maxA = 1;
+      for (let i = 3; i < d.length; i += 4) {
+        if (d[i] > maxA) maxA = d[i];
+      }
+
       for (let i = 0; i < d.length; i += 4) {
-        const a = d[i + 3];
-        if (a === 0) continue;
-        const idx = (a > 255 ? 255 : a) * 4;
-        d[i] = pal[idx];
+        const rawA = d[i + 3];
+        if (rawA === 0) continue;
+        // Normalize to [0,1], apply a gentle power curve (0.65) to give more
+        // visual weight to mid-density areas, then map to palette index 0-215.
+        const normalized = rawA / maxA;
+        const shaped = Math.pow(normalized, 0.65);
+        const a = Math.round(shaped * 215);
+        const idx = Math.min(255, a) * 4;
+        d[i]     = pal[idx];
         d[i + 1] = pal[idx + 1];
         d[i + 2] = pal[idx + 2];
-        // Boost alpha slightly so faint cells still register
-        d[i + 3] = Math.min(255, Math.round(a * 1.4));
+        // Keep visible opacity, boost faint cells slightly
+        d[i + 3] = Math.min(255, Math.round(a * 1.5));
       }
       oc.putImageData(img, 0, 0);
 
