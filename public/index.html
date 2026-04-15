@@ -1270,16 +1270,6 @@
       GrandRift: 'minimaps/GrandRift_Minimap.png',
       Lockdown: 'minimaps/Lockdown_Minimap.jpg',
     };
-
-    /**
-     * Convert world coords (x, z) to canvas pixel coords.
-     * Formula supplied verbatim — do not modify.
-     *
-     * u = (x - origin_x) / scale
-     * v = (z - origin_z) / scale
-     * pixel_x = u * 1024
-     * pixel_y = (1 - v) * 1024   ← Y flipped, image origin top-left
-     */
     function worldToCanvas(x, z, mapId, W, H) {
       const { scale, origin_x, origin_z } = MAP_CONFIG[mapId];
       const u = (x - origin_x) / scale;
