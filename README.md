@@ -10,27 +10,27 @@ An interactive match replay and analysis tool for Nakama game data. Built as a w
 
 ### Match Selection
 
-![Match selection dropdown](screenshots/screenshot6)
+![Match selection dropdown](screenshots/screenshot6.png)
 
 ### Heatmap View
 
-![Daily aggregate heatmap with heat layers](screenshots/Screenshot2)
+![Daily aggregate heatmap with heat layers](screenshots/Screenshot2.png)
 
 ### Timeline Playback
 
-![Timeline scrubber and playback controls](screenshots/screenshot1)
+![Timeline scrubber and playback controls](screenshots/screenshot1.png)
 
 ### Hot zones
 
-![Hotzone zoom](screenshots/Screenshot5)
+![Hotzone zoom](screenshots/Screenshot5.png)
 
 ### Daily aggregate heat map
 
-![Daily aggrigate heatmap](screenshots/Screenshot4)
+![Daily aggrigate heatmap](screenshots/Screenshot4.png)
 
 ### Lonely Zones
 
-![Lonely zones](screenshots/Screenshot3)
+![Lonely zones](screenshots/Screenshot3.png)
 
 ---
 
